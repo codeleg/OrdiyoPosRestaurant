@@ -1,0 +1,16 @@
+{
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@/*": [
+        "apps/web/src/*"
+      ],
+      "@postrestoran/shared": [
+        "packages/shared/src/index"
+      ],
+      "@postrestoran/shared/*": [
+        "packages/shared/src/*"
+      ]
+    }
+  }
+}

@@ -1,0 +1,21 @@
+# Ignore large, unnecessary artifact directories
+node_modules
+**/node_modules
+**/.next
+**/.turbo
+**/.git
+**/.gitignore
+**/*.md
+**/dist
+apps/api/prisma/client
+apps/api/uploads
+
+# Local env files (use .env.docker inside containers)
+.env
+.env.local
+.env*.local
+
+# Dev tooling
+**/*.log
+**/coverage
+**/.eslintcache

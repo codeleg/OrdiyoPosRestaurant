@@ -1,0 +1,547 @@
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum TenantPlan {
+  FREE
+  PRO
+  PREMIUM
+}
+
+enum SubscriptionStatus {
+  TRIAL
+  ACTIVE
+  EXPIRED
+  GRACE
+}
+
+model Tenant {
+  id                    String                 @id @default(uuid())
+  name                  String
+  isActive              Boolean                @default(true)
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
+  categories            Category[]
+  orders                Order[]
+  products              Product[]
+  tables                RestaurantTable[]
+  users                 User[]
+  zones                 Zone[]
+  productModifierGroups ProductModifierGroup[]
+  modifiers             Modifier[]
+  inventory             Inventory[]
+  orderItems            OrderItem[]
+  orderModifiers        OrderModifier[]
+  paymentAttempts       PaymentAttempt[]
+  staffLogs             StaffLog[]
+  auditLogs             AuditLog[]
+
+  // Phase 1 Foundations - Global & SaaS Support
+  region             String           @default("TR")
+  defaultCurrency    String           @default("TRY")
+  taxStrategyId      String           @default("NONE")
+  plan               TenantPlan         @default(FREE)
+  slug               String?            @unique
+  subscriptionStatus SubscriptionStatus @default(TRIAL)
+  subscriptionEndsAt DateTime?
+  trialEndsAt        DateTime?
+  stripeCustomerId   String?          @unique
+  providerCustomerId String?
+  settings           Json? // For feature flags and custom per-tenant configs
+  phone              String? // Business phone number
+  address            String? // Business address
+  ServiceRequest     ServiceRequest[]
+  devices            Device[]
+
+  @@map("tenants")
+}
+
+model User {
+  id                String     @id @default(uuid())
+  email             String     @unique
+  password          String
+  fullName          String
+  username          String?
+  pinCodeHash       String?
+  failedPinAttempts Int        @default(0)
+  pinLockedUntil    DateTime?
+  role              UserRole   @default(CASHIER)
+  isActive          Boolean    @default(true)
+  isEmailVerified   Boolean    @default(false)
+  emailVerifiedAt   DateTime?
+  tenantId          String
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
+  shift             ShiftType  @default(FULL_DAY)
+  status            UserStatus @default(ACTIVE)
+  tenant            Tenant     @relation(fields: [tenantId], references: [id])
+  ordersServed      Order[]    @relation("OrderWaiter")
+  staffLogs         StaffLog[]
+  auditLogs         AuditLog[]
+  verificationTokens VerificationToken[]
+
+  @@unique([tenantId, username])
+  @@index([tenantId, role])
+  @@map("users")
+}
+
+model VerificationToken {
+  id         String    @id @default(cuid())
+  userId     String
+  tokenHash  String
+  expiresAt  DateTime
+  createdAt  DateTime  @default(now())
+  usedAt     DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("verification_tokens")
+}
+
+model StaffLog {
+  id       String    @id @default(uuid())
+  userId   String
+  tenantId String
+  checkIn  DateTime  @default(now())
+  checkOut DateTime?
+  note     String?
+  user     User      @relation(fields: [userId], references: [id])
+  tenant   Tenant    @relation(fields: [tenantId], references: [id])
+
+  @@map("staff_logs")
+}
+
+model Product {
+  id             String                 @id @default(uuid())
+  name           String
+  description    String?
+  price          Decimal                @db.Decimal(10, 2)
+  image          String?
+  tenantId       String
+  categoryId     String?
+  isDeleted      Boolean                @default(false)
+  isActive       Boolean                @default(true)
+  isStockTracked Boolean                @default(true)
+  createdAt      DateTime               @default(now())
+  updatedAt      DateTime               @updatedAt
+  inventory      Inventory?
+  orderItems     OrderItem[]
+  modifierGroups ProductModifierGroup[]
+  category       Category?              @relation(fields: [categoryId], references: [id])
+  tenant         Tenant                 @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId, isDeleted])
+  @@index([tenantId, isActive])
+  @@index([tenantId, categoryId])
+  @@map("products")
+}
+
+model Category {
+  id        String     @id @default(uuid())
+  name      String
+  image     String?
+  sortOrder Int        @default(0)
+  tenantId  String
+  parentId  String?
+  isDeleted Boolean    @default(false)
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  parent    Category?  @relation("CategoryHierarchy", fields: [parentId], references: [id])
+  children  Category[] @relation("CategoryHierarchy")
+  tenant    Tenant     @relation(fields: [tenantId], references: [id])
+  products  Product[]
+
+  @@index([tenantId, isDeleted])
+  @@map("categories")
+}
+
+model ProductModifierGroup {
+  id           String     @id @default(uuid())
+  name         String
+  minSelection Int        @default(0)
+  maxSelection Int        @default(1)
+  productId    String
+  tenantId     String
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  modifiers    Modifier[]
+  product      Product    @relation(fields: [productId], references: [id])
+  tenant       Tenant     @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId])
+  @@map("product_modifier_groups")
+}
+
+model Modifier {
+  id             String               @id @default(uuid())
+  name           String
+  priceChange    Decimal              @default(0) @db.Decimal(10, 2)
+  groupId        String
+  tenantId       String
+  isDefault      Boolean              @default(false)
+  isAvailable    Boolean              @default(true)
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+  group          ProductModifierGroup @relation(fields: [groupId], references: [id])
+  orderModifiers OrderModifier[]
+  tenant         Tenant               @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId])
+  @@map("modifiers")
+}
+
+model Inventory {
+  id                String   @id @default(uuid())
+  quantity          Int      @default(0)
+  lowStockThreshold Int      @default(5)
+  allowBackorder    Boolean  @default(false)
+  productId         String   @unique
+  tenantId          String
+  updatedAt         DateTime @updatedAt
+  product           Product  @relation(fields: [productId], references: [id])
+  tenant            Tenant   @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId])
+  @@map("inventory")
+}
+
+model Zone {
+  id        String            @id @default(uuid())
+  name      String
+  tenantId  String
+  isDeleted Boolean           @default(false)
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+  tables    RestaurantTable[]
+  tenant    Tenant            @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId, isDeleted])
+  @@map("zones")
+}
+
+model RestaurantTable {
+  id              String           @id @default(uuid())
+  name            String
+  tenantId        String
+  zoneId          String?
+  x               Int              @default(0)
+  y               Int              @default(0)
+  width           Int              @default(100)
+  height          Int              @default(100)
+  shape           String           @default("rectangle")
+  capacity        Int              @default(4)
+  status          String           @default("AVAILABLE")
+  isReserved      Boolean          @default(false)
+  reservedUntil   DateTime?
+  mergedWithId    String?
+  currentOrderId  String?
+  isDeleted       Boolean          @default(false)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  orders          Order[]
+  serviceRequests ServiceRequest[]
+  tenant          Tenant           @relation(fields: [tenantId], references: [id])
+  zone            Zone?            @relation(fields: [zoneId], references: [id])
+
+  @@index([tenantId, status])
+  @@index([tenantId, isDeleted])
+  @@map("restaurant_tables")
+}
+
+model Order {
+  id            String          @id @default(uuid())
+  orderNumber   Int             @default(autoincrement())
+  tenantId      String
+  tableId       String
+  status        OrderStatus     @default(PENDING)
+  totalAmount   Decimal         @db.Decimal(10, 2)
+  note          String?
+  isDeleted     Boolean         @default(false)
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  paidAt        DateTime?
+  paymentMethod PaymentMethod?
+  paymentRef    String?
+  paymentStatus PaymentStatus   @default(PENDING)
+  guestCount    Int?            @default(1)
+  guestPhone    String?
+  guestName     String?
+  waiterId      String?
+  version       Int             @default(1)
+  items         OrderItem[]
+  table         RestaurantTable @relation(fields: [tableId], references: [id])
+  tenant        Tenant          @relation(fields: [tenantId], references: [id])
+  waiter        User?           @relation("OrderWaiter", fields: [waiterId], references: [id])
+
+  // Phase 1 Foundations
+  origin         OrderOrigin @default(WAITER)
+  idempotencyKey String?
+
+  @@unique([tenantId, idempotencyKey])
+  @@index([tenantId, createdAt])
+  @@index([tenantId, tableId, status])
+  @@index([tenantId, status])
+  @@map("orders")
+}
+
+enum OrderItemStatus {
+  PENDING
+  PREPARING
+  READY
+  SERVED
+  CANCELLED
+}
+
+model OrderItem {
+  id              String          @id @default(uuid())
+  orderId         String
+  productId       String
+  tenantId        String
+  quantity        Int             @default(1)
+  unitPrice       Decimal         @db.Decimal(10, 2)
+  totalPrice      Decimal         @db.Decimal(10, 2)
+  note            String?
+  isStockDeducted Boolean         @default(false)
+  roundIndex      Int             @default(0)
+  status          OrderItemStatus @default(PENDING)
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  order           Order           @relation(fields: [orderId], references: [id])
+  product         Product         @relation(fields: [productId], references: [id])
+  modifiers       OrderModifier[]
+  tenant          Tenant          @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId])
+  @@index([orderId, roundIndex])
+  @@index([productId])
+  @@map("order_items")
+}
+
+model OrderModifier {
+  id          String    @id @default(uuid())
+  orderItemId String
+  modifierId  String
+  tenantId    String
+  name        String
+  priceChange Decimal   @db.Decimal(10, 2)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  modifier    Modifier  @relation(fields: [modifierId], references: [id])
+  orderItem   OrderItem @relation(fields: [orderItemId], references: [id])
+  tenant      Tenant    @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId])
+  @@index([orderItemId])
+  @@index([modifierId])
+  @@map("order_modifiers")
+}
+
+model SupportedLanguage {
+  code         String        @id
+  name         String
+  direction    String        @default("ltr")
+  isDefault    Boolean       @default(false)
+  isActive     Boolean       @default(true)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  translations Translation[]
+
+  @@map("supported_languages")
+}
+
+model Translation {
+  id           String            @id @default(uuid())
+  key          String
+  value        String
+  languageCode String
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+  language     SupportedLanguage @relation(fields: [languageCode], references: [code])
+
+  @@unique([key, languageCode])
+  @@map("translations")
+}
+
+enum UserRole {
+  OWNER
+  MANAGER
+  CASHIER
+  WAITER
+  KITCHEN
+}
+
+enum UserStatus {
+  ACTIVE
+  OFF_DUTY
+  ON_LEAVE
+}
+
+enum ShiftType {
+  MORNING
+  EVENING
+  FULL_DAY
+}
+
+enum OrderStatus {
+  PENDING
+  PREPARING
+  READY
+  COMPLETED
+  CANCELLED
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  FAILED
+  REFUNDED
+}
+
+enum PaymentMethod {
+  CASH
+  CARD
+  ONLINE
+  OTHER
+}
+
+enum OrderOrigin {
+  WAITER
+  GUEST_QR
+  DELIVERY
+  KIOSK
+}
+
+enum PaymentAttemptStatus {
+  INIT
+  PAID
+  FAILED
+  CANCELLED
+  REFUND_PENDING
+  REFUNDED
+  REFUND_FAILED
+  MANUAL_REVIEW
+}
+
+model PaymentAttempt {
+  id                String               @id @default(uuid())
+  tenantId          String
+  referenceId       String // e.g., cartId, draftId, or tableId
+  providerId        String // e.g., 'MOCK', 'IYZICO'
+  status            PaymentAttemptStatus @default(INIT)
+  amountMinor       BigInt // Stored in minor units (bigint)
+  currency          String // ISO 4217 code
+  providerRef       String? // External reference (e.g., paymentId)
+  idempotencyKey    String               @unique
+  metadata          Json? // Raw response from provider or request body
+  refundAttemptedAt DateTime?
+  refundedAt        DateTime?
+  errorMessage      String?
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+  tenant            Tenant               @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId, referenceId])
+  @@index([idempotencyKey])
+  @@index([providerRef])
+  @@map("payment_attempts")
+}
+
+enum OutboxStatus {
+  PENDING
+  PROCESSING
+  PROCESSED
+  FAILED
+}
+
+model OutboxEvent {
+  id            String       @id @default(uuid())
+  type          String // e.g., 'order.updated', 'table.updated'
+  payload       Json
+  status        OutboxStatus @default(PENDING)
+  attempts      Int          @default(0)
+  lastError     String?
+  tenantId      String
+  correlationId String? // For idempotency (e.g., checkoutId)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  processedAt   DateTime?
+  nextRetryAt   DateTime? // For exponential backoff
+
+  @@index([status, createdAt])
+  @@index([status, updatedAt])
+  @@map("outbox_events")
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  tenantId   String
+  userId     String? // null ise System veya Guest islemi
+  action     String // ORDER_CANCELLED, ITEM_DELETED, vs.
+  entityType String // ORDER, ORDER_ITEM, PAYMENT
+  entityId   String
+  previous   Json? // Sadece silinen/degisen eski degerler (diff)
+  next       Json? // Sadece yeni atanan degerler (diff)
+  metadata   Json? // IP adresi, user agent, veya islem detayi (reason vb.)
+  createdAt  DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  user   User?  @relation(fields: [userId], references: [id])
+
+  @@index([tenantId, createdAt])
+  @@index([tenantId, action])
+  @@map("audit_logs")
+}
+
+enum ServiceRequestType {
+  CLEANING
+  QUESTION
+  BILL
+}
+
+enum ServiceRequestStatus {
+  PENDING
+  ACKNOWLEDGED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+model ServiceRequest {
+  id        String               @id @default(uuid())
+  tenantId  String
+  tableId   String
+  tableName String
+  type      ServiceRequestType
+  status    ServiceRequestStatus @default(PENDING)
+  createdAt DateTime             @default(now())
+  updatedAt DateTime             @updatedAt
+
+  table  RestaurantTable @relation(fields: [tableId], references: [id])
+  tenant Tenant          @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId, status])
+  @@index([tableId, status, createdAt])
+  @@map("service_requests")
+}
+
+model Device {
+  id           String    @id @default(uuid())
+  tenantId     String
+  name         String
+  deviceToken  String    @unique
+  isRevoked    Boolean   @default(false)
+  lastIp       String?
+  lastActiveAt DateTime  @default(now())
+  createdAt    DateTime  @default(now())
+  tenant       Tenant    @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId])
+  @@map("devices")
+}
