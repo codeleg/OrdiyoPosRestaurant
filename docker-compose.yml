@@ -55,7 +55,7 @@ services:
       dockerfile: docker/api.Dockerfile
       target: development
     image: postrestoran-api:dev
-    command: npx prisma migrate deploy --schema=apps/api/prisma/schema.prisma
+    command: npm exec --workspace=api -- prisma migrate deploy --schema=prisma/schema.prisma
     env_file:
       - .env.docker
     depends_on:
@@ -83,7 +83,11 @@ services:
       - .:/app:cached
       - root_node_modules:/app/node_modules
       - api_node_modules:/app/apps/api/node_modules
-    command: npm run dev --workspace=api
+    command: >
+      sh -c "if [ ! -x node_modules/.bin/nest ]; then npm ci; fi
+      && npm run build --workspace=@postrestoran/shared
+      && npm exec --workspace=api -- prisma generate --schema=prisma/schema.prisma
+      && npm run dev --workspace=api"
     deploy:
       resources:
         limits:
@@ -102,7 +106,8 @@ services:
       test: [ "CMD", "wget", "-qO-", "http://127.0.0.1:3001/api/v1/health" ]
       interval: 10s
       timeout: 5s
-      retries: 5
+      retries: 12
+      start_period: 60s
 
   web:
     build:
@@ -122,7 +127,10 @@ services:
       - root_node_modules:/app/node_modules
       - web_node_modules:/app/apps/web/node_modules
       - web_next:/app/apps/web/.next
-    command: npm run dev --workspace=web
+    command: >
+      sh -c "if [ ! -x node_modules/.bin/next ]; then npm ci; fi
+      && npm run build --workspace=@postrestoran/shared
+      && npm run dev --workspace=web"
     deploy:
       resources:
         limits:

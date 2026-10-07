@@ -78,4 +78,7 @@ logs/
 # Temporary files
 tmp/
 temp/
-*.t*
+*.tmp
+*.temp
+dump.rdb
+*.webp
