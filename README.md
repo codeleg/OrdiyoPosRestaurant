@@ -1,6 +1,8 @@
+
 # Ordiyo Pos
 Post Restaurant-Coffee SaaS Project
-Bu rapor, Ordiyo Pos’u bir YouTube serisinde anlatman için beş derslik bir iskelet. Her ders hem “şunu aç, şunu yaz” hem de bir yazılım mühendisinin o katmanda bilmesi gereken kararı kapsar.
+Bu rapor, Ordiyo Pos’u bir YouTube serisinde anlattığım beş derslik bir iskelet. 
+Her ders hem “şunu aç, şunu yaz” hem de bir yazılım mühendisinin o katmanda bilmesi gereken kararı kapsar.
 
 ## Serinin omurgası
 
