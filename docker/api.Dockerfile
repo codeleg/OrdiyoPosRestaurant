@@ -20,10 +20,12 @@ RUN npm ci
 
 # Stage 3: Development Stage (Full Dependencies)
 FROM base AS development
+# wget required for compose healthcheck in development images
+RUN apk add --no-cache wget
 WORKDIR /app
 COPY --from=pruner /app/out/full/ ./
-# Generate Prisma client for dev
-RUN npx prisma generate --schema=apps/api/prisma/schema.prisma
+# Generate Prisma client for dev (run via api workspace so prisma resolves correctly)
+RUN npm exec --workspace=api -- prisma generate --schema=prisma/schema.prisma
 # Build shared for the dev environment
 RUN npm run build --workspace=@postrestoran/shared
 
